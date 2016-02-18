@@ -22,9 +22,11 @@ _RESOURCE_CLASS_NAME = 'DISK_GB'
 _RESOURCE_CLASS_ID = 2
 _RESOURCE_PROVIDER_ID = 1
 _RESOURCE_PROVIDER_UUID = uuids.resource_provider
+_RESOURCE_PROVIDER_NAME = uuids.resource_name
 _RESOURCE_PROVIDER_DB = {
     'id': _RESOURCE_PROVIDER_ID,
     'uuid': _RESOURCE_PROVIDER_UUID,
+    'name': _RESOURCE_PROVIDER_NAME,
 }
 _INVENTORY_ID = 2
 _INVENTORY_DB = {
@@ -82,6 +84,14 @@ class _TestResourceProviderNoDB(object):
         self.assertRaises(exception.ObjectActionError,
                           obj.create)
 
+    def test_make_compatible_10(self):
+        rp_obj = objects.ResourceProvider(context=self.context,
+                                       uuid=_RESOURCE_PROVIDER_UUID,
+                                       name=_RESOURCE_PROVIDER_NAME)
+        self.assertEqual(_RESOURCE_PROVIDER_NAME, rp_obj.name)
+        primitive = rp_obj.obj_to_primitive(target_version='1.0')
+        self.assertNotIn('name', primitive)
+
 
 class TestResourceProviderNoDB(test_objects._LocalTest,
                                _TestResourceProviderNoDB):
@@ -96,24 +106,23 @@ class TestRemoteResourceProviderNoDB(test_objects._RemoteTest,
 class TestResourceProvider(test_objects._LocalTest):
 
     def test_create_in_db(self):
-        updates = {'uuid': _RESOURCE_PROVIDER_UUID}
+        updates = {'uuid': _RESOURCE_PROVIDER_UUID,
+                   'name': _RESOURCE_PROVIDER_NAME}
         db_rp = objects.ResourceProvider._create_in_db(
             self.context, updates)
         self.assertIsInstance(db_rp.id, int)
         self.assertEqual(_RESOURCE_PROVIDER_UUID, db_rp.uuid)
+        self.assertEqual(_RESOURCE_PROVIDER_NAME, db_rp.name)
 
     def test_get_by_uuid_from_db(self):
         rp = objects.ResourceProvider(context=self.context,
-                                      uuid=_RESOURCE_PROVIDER_UUID)
+                                      uuid=_RESOURCE_PROVIDER_UUID,
+                                      name=_RESOURCE_PROVIDER_NAME)
         rp.create()
         retrieved_rp = objects.ResourceProvider._get_by_uuid_from_db(
             self.context, _RESOURCE_PROVIDER_UUID)
         self.assertEqual(rp.uuid, retrieved_rp.uuid)
-
-        self.assertRaises(exception.NotFound,
-                          objects.ResourceProvider._get_by_uuid_from_db,
-                          self.context,
-                          uuids.missing)
+        self.assertEqual(rp.name, retrieved_rp.name)
 
 
 class _TestInventoryNoDB(object):

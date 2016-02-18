@@ -635,7 +635,7 @@ class BaseTrackerTestCase(BaseTestCase):
         return updates
 
     def _fake_rp_create(self, context, updates):
-        return dict(updates, id=1)
+        return dict(updates, id=1, name=None)
 
     def _fake_compute_node_delete(self, ctx, compute_node_id):
         self.deleted = True

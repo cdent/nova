@@ -10,6 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_utils import versionutils
 from sqlalchemy.orm import joinedload
 
 from nova.db.sqlalchemy import api as db_api
@@ -40,11 +41,13 @@ def _get_rp_by_uuid_from_db(context, uuid):
 @base.NovaObjectRegistry.register
 class ResourceProvider(base.NovaObject):
     # Version 1.0: Initial version
-    VERSION = '1.0'
+    # Version 1.1: Added name field
+    VERSION = '1.1'
 
     fields = {
         'id': fields.IntegerField(read_only=True),
         'uuid': fields.UUIDField(nullable=False),
+        'name': fields.StringField(nullable=True),
     }
 
     @base.remotable
@@ -63,6 +66,14 @@ class ResourceProvider(base.NovaObject):
     def get_by_uuid(cls, context, uuid):
         db_resource_provider = cls._get_by_uuid_from_db(context, uuid)
         return cls._from_db_object(context, cls(), db_resource_provider)
+
+    def obj_make_compatible(self, primitive, target_version):
+        super(ResourceProvider, self).obj_make_compatible(primitive,
+                                                          target_version)
+        target_version = versionutils.convert_version_to_tuple(target_version)
+        if target_version < (1, 1):
+            if 'name' in primitive:
+                del primitive['name']
 
     @staticmethod
     def _create_in_db(context, updates):
