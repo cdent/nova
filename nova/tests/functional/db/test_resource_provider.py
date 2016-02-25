@@ -165,3 +165,123 @@ class ResourceProviderTestCase(test.NoDBTestCase):
         )
 
         self.assertEqual(0, len(allocations))
+
+
+class ResourcePoolTestCase(test.NoDBTestCase):
+    """Test resource-pool objects' lifecycles."""
+
+    def setUp(self):
+        super(ResourcePoolTestCase, self).setUp()
+        self.useFixture(fixtures.Database())
+        self.context = context.RequestContext('fake-user', 'fake-project')
+
+    def test_create_and_retrieve_resource_pool(self):
+        aggregate_0 = objects.Aggregate(self.context,
+                                        name=uuidsentinel.aggregate_0_name)
+        aggregate_0.create()
+        aggregate_1 = objects.Aggregate(self.context,
+                                        name=uuidsentinel.aggregate_1_name)
+        aggregate_1.create()
+        aggregates = objects.AggregateList(objects=[aggregate_0,
+                                                    aggregate_1])
+        resource_provider = objects.ResourceProvider(
+            self.context, name=uuidsentinel.resource_provider_name,
+            uuid=uuidsentinel.resource_provider_uuid)
+        resource_provider.create()
+
+        rp = objects.ResourcePool(self.context,
+                                  resource_provider=resource_provider,
+                                  aggregates=aggregates)
+        rp.create()
+
+        self.assertEqual(resource_provider.name, rp.resource_provider.name)
+        self.assertEqual(resource_provider.uuid, rp.resource_provider.uuid)
+        self.assertIn(aggregate_0, rp.aggregates)
+        self.assertIn(aggregate_1, rp.aggregates)
+
+        retrieved_rp = objects.ResourcePool.get_by_resource_provider_uuid(
+            self.context, uuidsentinel.resource_provider_uuid)
+
+        self.assertEqual(resource_provider.name,
+                         retrieved_rp.resource_provider.name)
+        self.assertEqual(resource_provider.uuid,
+                         retrieved_rp.resource_provider.uuid)
+        self.assertEqual([], retrieved_rp.resources)
+
+        retrieved_rp.aggregates.sort(key=lambda x: x.id)
+        # NOTE(cdent): I was hoping objects themselves would be
+        # comparable, but it seems not, so comparing contents.
+        self.assertEqual(aggregate_0.uuid, retrieved_rp.aggregates[0].uuid)
+        self.assertEqual(aggregate_1.uuid, retrieved_rp.aggregates[1].uuid)
+
+        # try to create the same rp again
+        rp = objects.ResourcePool(self.context,
+                                  resource_provider=resource_provider,
+                                  aggregates=aggregates)
+        self.assertRaises(exception.ObjectActionError, rp.create)
+
+    def test_resource_pool_inventories(self):
+        # Create a resource provider
+        resource_provider = objects.ResourceProvider(
+            self.context, name=uuidsentinel.resource_provider_name,
+            uuid=uuidsentinel.resource_provider_uuid)
+        resource_provider.create()
+
+        # Make a pool for that resource provider
+        resource_pool = objects.ResourcePool(
+            self.context, resource_provider=resource_provider)
+        resource_pool.create()
+
+        # Create a disk inventory for that resource provider
+        resource_class = fields.ResourceClass.DISK_GB
+        disk_inventory = objects.Inventory(
+            context=self.context,
+            resource_provider=resource_provider,
+            resource_class=resource_class,
+            **DISK_INVENTORY
+        )
+        disk_inventory.create()
+
+        # Allocate a usage.
+        # NOTE(cdent): There's no guard at this point to limit what
+        # we can allocate (the relationship with the Inventory is
+        # not checked, yet).
+        allocation = objects.Allocation(
+            context=self.context,
+            resource_provider=resource_provider,
+            consumer_id=DISK_ALLOCATION['consumer_id'],
+            resource_class=resource_class,
+            used=DISK_ALLOCATION['used']
+        )
+        allocation.create()
+
+        inventoried_pool = (
+            objects.ResourcePool.get_by_resource_provider_uuid(
+                self.context, uuidsentinel.resource_provider_uuid))
+
+        # NOTE(cdent): I was hoping objects themselves would be
+        # comparable, but it seems not, so comparing contents.
+        self.assertEqual(disk_inventory.id,
+                         inventoried_pool.inventories[0].id)
+        self.assertEqual(disk_inventory.total,
+                         inventoried_pool.inventories[0].total)
+        self.assertEqual(DISK_INVENTORY['total'],
+                         inventoried_pool.inventories[0].total)
+
+        allocation = objects.Allocation(
+            context=self.context,
+            resource_provider=resource_provider,
+            consumer_id=DISK_ALLOCATION['consumer_id'],
+            resource_class=resource_class,
+            used=DISK_ALLOCATION['used']
+        )
+        allocation.create()
+
+        # NOTE(cdent): Resources currently a property but not certain
+        # that makes sense.
+        disk_resource = inventoried_pool.resources[0]
+
+        self.assertEqual(resource_class, disk_resource['resource_class'])
+        self.assertEqual(4, disk_resource['used'])
+        self.assertEqual(DISK_INVENTORY['total'], disk_resource['total'])
+        self.assertEqual(DISK_INVENTORY['max_unit'], disk_resource['max_unit'])

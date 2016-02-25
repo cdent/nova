@@ -10,8 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_db import exception as db_exc
 from oslo_utils import versionutils
 from sqlalchemy.orm import joinedload
+from sqlalchemy.sql import func
 
 from nova.db.sqlalchemy import api as db_api
 from nova.db.sqlalchemy import models
@@ -287,3 +289,106 @@ class AllocationList(base.ObjectListBase, base.NovaObject):
         return context.session.query(models.Allocation).filter_by(
             resource_provider_id = resource_provider_id,
             resource_class_id = resource_class_id).all()
+
+
+@base.NovaObjectRegistry.register
+class ResourcePool(base.NovaObject):
+    # Version 1.0: Initial Version
+    VERSION = '1.0'
+
+    fields = {
+        'resource_provider': fields.ObjectField('ResourceProvider',
+                                                nullable=False),
+        'inventories': fields.ObjectField(
+            'InventoryList', nullable=False,
+            default=objects.InventoryList(objects=[])),
+        'aggregates': fields.ObjectField(
+            'AggregateList', nullable=False,
+            default=objects.AggregateList(objects=[])),
+    }
+
+    @property
+    @base.remotable
+    def resources(self):
+        """Join inventories with allocations to get used."""
+        # NOTE(cdent): Does this mean we need yet another object?
+        resource_data = self._get_resource_data(self._context,
+                                                self.resource_provider)
+        return resource_data
+
+    @base.remotable
+    def create(self):
+        """Associate the resource_provider with the aggregates."""
+        self.obj_set_defaults()
+        try:
+            self._make_resource_provider_aggregates(self._context,
+                                                    self.resource_provider,
+                                                    self.aggregates)
+        except db_exc.DBDuplicateEntry:
+            raise exception.ObjectActionError(
+                action='create', reason='aggregate already associated')
+
+    @staticmethod
+    @db_api.main_context_manager.reader
+    def _get_resource_data(context, resource_provider):
+        # NOTE(cdent): Is this yet another object we need here?
+        query = (context.session.query(
+            models.Inventory, func.sum(models.Allocation.used).label('used')).
+            join(models.Allocation,
+                 models.Inventory.resource_provider_id ==  # noqa
+                 models.Allocation.resource_provider_id).
+            filter(models.Inventory.resource_provider_id ==  # noqa
+                   resource_provider.id).
+            group_by(models.Allocation.resource_class_id))
+        # TODO(cdent): This is noisy and annoying and should be
+        # changed before we finish this process, but doing it this
+        # way for now to keep moving.
+        return [dict(total=inventory.total,
+                     resource_class=fields.ResourceClass.from_index(
+                         inventory.resource_class_id),
+                     reserved=inventory.reserved,
+                     allocation_ration=inventory.allocation_ratio,
+                     min_unit=inventory.min_unit,
+                     max_unit=inventory.max_unit,
+                     step_size=inventory.step_size,
+                     used=used)
+                for inventory, used in query.all()]
+
+    @staticmethod
+    @db_api.main_context_manager.writer
+    def _make_resource_provider_aggregates(context, resource_provider,
+                                           aggregates):
+        for aggregate in aggregates:
+            db_rpa = models.ResourceProviderAggregate(
+                resource_provider_id=resource_provider.id,
+                aggregate_id=aggregate.id)
+            context.session.add(db_rpa)
+
+    @base.remotable_classmethod
+    def get_by_resource_provider_uuid(cls, context, rp_uuid):
+        return cls._build_from_resource_provider_uuid(context, cls(), rp_uuid)
+
+    @staticmethod
+    @db_api.main_context_manager.reader
+    def _build_from_resource_provider_uuid(context, resource_pool, rp_uuid):
+        resource_pool.resource_provider = objects.ResourceProvider.get_by_uuid(
+            context, rp_uuid)
+
+        aggregates = (context.session.query(models.Aggregate).
+            join(models.ResourceProviderAggregate,
+                 models.ResourceProviderAggregate.aggregate_id ==  # noqa
+                 models.Aggregate.id).
+            filter(models.ResourceProviderAggregate
+                   .resource_provider_id ==  # noqa
+                   resource_pool.resource_provider.id).all())
+        resource_pool.aggregates = base.obj_make_list(
+            context, objects.AggregateList(context),
+            objects.Aggregate, aggregates)
+
+        resource_pool.inventories = (
+            objects.InventoryList.get_all_by_resource_provider_uuid(
+                context, resource_pool.resource_provider.uuid))
+
+        resource_pool._context = context
+        resource_pool.obj_reset_changes()
+        return resource_pool
