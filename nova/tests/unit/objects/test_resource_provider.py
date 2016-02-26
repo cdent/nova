@@ -38,6 +38,14 @@ _INVENTORY_DB = {
     'step_size': 1,
     'allocation_ratio': 1.0,
 }
+_ALLOCATION_ID = 2
+_ALLOCATION_DB = {
+    'id': _ALLOCATION_ID,
+    'resource_provider_id': _RESOURCE_PROVIDER_ID,
+    'resource_class_id': _RESOURCE_CLASS_ID,
+    'consumer_id': uuids.fake_instance,
+    'used': 8,
+}
 
 
 class _TestResourceProviderNoDB(object):
@@ -268,3 +276,89 @@ class TestInventory(test_objects._LocalTest):
         inventory_dict.pop('id')
         inventory = objects.Inventory(self.context, **inventory_dict)
         self.assertRaises(exception.ObjectActionError, inventory.save)
+
+
+class _TestAllocationNoDB(object):
+    @mock.patch('nova.objects.Allocation._create_in_db',
+                return_value=_ALLOCATION_DB)
+    def test_create(self, mock_db_create):
+        rp = objects.ResourceProvider(id=_RESOURCE_PROVIDER_ID,
+                                      uuid=uuids.resource_provider)
+        obj = objects.Allocation(context=self.context,
+                                 resource_provider=rp,
+                                 resource_class=_RESOURCE_CLASS_NAME,
+                                 consumer_id=uuids.fake_instance,
+                                 used=8)
+        obj.create()
+        self.assertEqual(_ALLOCATION_ID, obj.id)
+        expected = dict(_ALLOCATION_DB)
+        expected.pop('id')
+        mock_db_create.assert_called_once_with(self.context, expected)
+
+    def test_create_with_id_fails(self):
+        rp = objects.ResourceProvider(id=_RESOURCE_PROVIDER_ID,
+                                      uuid=uuids.resource_provider)
+        obj = objects.Allocation(context=self.context,
+                                 id=99,
+                                 resource_provider=rp,
+                                 resource_class=_RESOURCE_CLASS_NAME,
+                                 consumer_id=uuids.fake_instance,
+                                 used=8)
+        self.assertRaises(exception.ObjectActionError, obj.create)
+
+
+class TestAllocationNoDB(test_objects._LocalTest,
+                         _TestAllocationNoDB):
+    USES_DB = False
+
+
+class TestRemoteAllocationNoDB(test_objects._RemoteTest,
+                               _TestAllocationNoDB):
+    USES_DB = False
+
+
+class TestAllocation(test_objects._LocalTest):
+
+    def _make_allocation(self):
+        db_rp = objects.ResourceProvider(
+            context=self.context, uuid=uuids.allocation_resource_provider)
+        db_rp.create()
+        updates = dict(_ALLOCATION_DB,
+                       resource_provider_id=db_rp.id)
+        updates.pop('id')
+        db_allocation = objects.Allocation._create_in_db(self.context,
+                                                         updates)
+        return db_rp, db_allocation
+
+    def test_create_in_db(self):
+        updates = dict(_ALLOCATION_DB)
+        updates.pop('id')
+        db_allocation = objects.Allocation._create_in_db(
+            self.context, updates)
+        self.assertEqual(_ALLOCATION_DB['used'], db_allocation.used)
+        self.assertIsInstance(db_allocation.id, int)
+
+    def test_destroy(self):
+        db_rp, db_allocation = self._make_allocation()
+        allocations = objects.AllocationList.get_allocations(
+            self.context, db_rp, _RESOURCE_CLASS_NAME)
+        self.assertEqual(1, len(allocations))
+        objects.Allocation._destroy(self.context, db_allocation.id)
+        allocations = objects.AllocationList.get_allocations(
+            self.context, db_rp, _RESOURCE_CLASS_NAME)
+        self.assertEqual(0, len(allocations))
+        self.assertRaises(exception.NotFound, objects.Allocation._destroy,
+                          self.context, db_allocation.id)
+
+    def test_get_allocations_from_db(self):
+        db_rp, db_allocation = self._make_allocation()
+        allocations = objects.AllocationList._get_allocations_from_db(
+            self.context, db_rp.id, _RESOURCE_CLASS_ID)
+        self.assertEqual(1, len(allocations))
+        self.assertEqual(db_rp.id, allocations[0].resource_provider_id)
+        self.assertEqual(db_allocation.resource_provider_id,
+                         allocations[0].resource_provider_id)
+
+        allocations = objects.AllocationList._get_allocations_from_db(
+            self.context, uuids.bad_rp_uuid, _RESOURCE_CLASS_ID)
+        self.assertEqual(0, len(allocations))

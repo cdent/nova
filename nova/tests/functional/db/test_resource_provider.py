@@ -24,7 +24,14 @@ DISK_INVENTORY = dict(
     min_unit=2,
     max_unit=5,
     step_size=1,
-    allocation_ratio=1.0
+    allocation_ratio=1.0,
+    resource_class=fields.ResourceClass.DISK_GB
+)
+
+DISK_ALLOCATION = dict(
+    consumer_id=uuidsentinel.disk_consumer,
+    used=2,
+    resource_class=fields.ResourceClass.DISK_GB
 )
 
 
@@ -64,11 +71,9 @@ class ResourceProviderTestCase(test.NoDBTestCase):
             context=self.context,
             uuid=uuidsentinel.inventory_resource_provider
         )
-        resource_class = fields.ResourceClass.DISK_GB
         disk_inventory = objects.Inventory(
             context=self.context,
             resource_provider=resource_provider,
-            resource_class=resource_class,
             **DISK_INVENTORY
         )
         self.assertRaises(exception.ObjectActionError,
@@ -84,7 +89,6 @@ class ResourceProviderTestCase(test.NoDBTestCase):
         disk_inventory = objects.Inventory(
             context=self.context,
             resource_provider=resource_provider,
-            resource_class=resource_class,
             **DISK_INVENTORY
         )
         disk_inventory.create()
@@ -112,3 +116,47 @@ class ResourceProviderTestCase(test.NoDBTestCase):
             objects.InventoryList.get_all_by_resource_provider_uuid(
             self.context, resource_provider.uuid))
         self.assertEqual(33, reloaded_inventories[0].total)
+
+    def test_create_list_and_delete_allocation(self):
+        resource_provider = objects.ResourceProvider(
+            context=self.context,
+            uuid=uuidsentinel.allocation_resource_provider
+        )
+        resource_provider.create()
+        resource_class = fields.ResourceClass.DISK_GB
+        disk_allocation = objects.Allocation(
+            context=self.context,
+            resource_provider=resource_provider,
+            **DISK_ALLOCATION
+        )
+        disk_allocation.create()
+
+        self.assertEqual(resource_class, disk_allocation.resource_class)
+        self.assertEqual(resource_provider,
+                         disk_allocation.resource_provider)
+        self.assertEqual(DISK_ALLOCATION['used'],
+                         disk_allocation.used)
+        self.assertEqual(DISK_ALLOCATION['consumer_id'],
+                         disk_allocation.consumer_id)
+        self.assertIsInstance(disk_allocation.id, int)
+
+        allocations = objects.AllocationList.get_allocations(
+            context=self.context,
+            resource_provider=resource_provider,
+            resource_class=resource_class
+        )
+
+        self.assertEqual(1, len(allocations))
+
+        self.assertEqual(DISK_ALLOCATION['used'],
+                        allocations[0].used)
+
+        allocations[0].destroy()
+
+        allocations = objects.AllocationList.get_allocations(
+            context=self.context,
+            resource_provider=resource_provider,
+            resource_class=resource_class
+        )
+
+        self.assertEqual(0, len(allocations))
