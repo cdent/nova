@@ -1,0 +1,13 @@
+#
+# Getting Started
+#
+
+fixtures:
+    - ConfigFixture
+
+tests:
+
+    - name: get root
+      GET: /
+      response_strings:
+          - '"min_version": "2.1"'
