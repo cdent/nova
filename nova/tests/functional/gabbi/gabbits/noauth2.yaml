@@ -1,0 +1,23 @@
+#
+# Use the noauth2 auth_strategy
+#
+
+defaults:
+    request_headers:
+        x-auth-token: admin:admin
+
+fixtures:
+    - ConfigFixture
+
+tests:
+
+    - name: get /v2.1
+      GET: /v2.1
+      status: 302
+      response_headers:
+          location: //v2.1//
+
+    - name: retry /v2.1
+      GET: $LOCATION
+      response_json_paths:
+          $.version.min_version: "2.1"

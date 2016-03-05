@@ -2,6 +2,7 @@
 # Getting Started
 #
 
+
 fixtures:
     - ConfigFixture
 
@@ -9,5 +10,11 @@ tests:
 
     - name: get root
       GET: /
-      response_strings:
-          - '"min_version": "2.1"'
+      response_json_paths:
+          $.versions[?status = "CURRENT"].id: v2.1
+
+    - name: get v2.1
+      desc: returns 204 at /v2.1/, which is just weird
+      xfail: true
+      GET: $RESPONSE['$.versions[?status = "CURRENT"].links[?rel = "self"].href']
+      status: 200

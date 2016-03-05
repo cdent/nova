@@ -45,6 +45,7 @@ class ConfigFixture(fixture.GabbiFixture):
         rpc.init(self.conf)
 
         self.conf.set_override('rpc_backend', 'fake')
+        self.conf.set_override('auth_strategy', 'noauth2')
 
     def stop_fixture(self):
         rpc.cleanup()
