@@ -1,0 +1,29 @@
+
+defaults:
+    verbose: True
+
+tests:
+- name: what is at root
+  GET: /
+  response_strings:
+      - hi
+
+- name: what is at resource pools
+  request_headers:
+    x-auth-token: admin
+  GET: /resource_pools
+  response_strings:
+      - resource pools
+
+- name: post new resource pool
+  request_headers:
+    x-auth-token: admin
+  POST: /resource_pools
+  data:
+      name: $ENVIRON['UUID']
+      uuid: $ENVIRON['UUID']
+#       aggregates:
+#           - 7f9484e2-197d-4011-9a3e-e92002e37089
+  response_strings:
+      - noo
+
